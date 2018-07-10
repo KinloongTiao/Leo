@@ -1,0 +1,258 @@
+import pandas as pd
+import psycopg2 as psy
+import xlwt
+import time as ti
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+
+class marketAnalysis:
+
+    def __index__(self):
+        self.start = start
+        self.end = end
+        self.conn = self.pg_connect()
+
+    def pg_connect(self):
+        conn = psy.connect(database="pdt", user="user1", password="pass1", host="47.75.174.88", port="5432")
+        print('Opened database successfully')
+
+        return conn
+
+    def trade_fetch_from_db(self, conn):
+
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        onedayago = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+        twodaysago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')
+
+        print('time program begin : ', now)
+        print('time yesterday :', onedayago)
+        print('We are analyzing the market trade date from yesterday to present!')
+
+        query = "select * from okcoin where symbol = 'ORSOKB' and data_type = 'trade' and updated_time > " +"'" + onedayago +"'" +" and updated_time<"+"'" + now + "'"
+        prices = pd.read_sql_query(query, conn)
+        prices['metadata'] = prices.meta_data.apply(lambda x: x['metadata'])
+        prices['timestamp'] = prices.meta_data.apply(lambda x: x['timestamp'])
+        new = []
+
+        if not prices.empty:
+            for i in range(len(prices)):
+                row = prices.iloc[i, :].to_dict()
+                for j in range(len(row['metadata'])):
+                    row['timestamp'] = prices[i:i + 1]['timestamp']
+                    row['order_id'] = row['metadata'][j][0]
+                    row['time'] = row['metadata'][j][1]
+                    row['price'] = row['metadata'][j][2]
+                    row['side'] = row['metadata'][j][3]
+                    row['size'] = row['metadata'][j][4]
+                    new.append(row)
+
+        df = pd.DataFrame(new)
+        del df['meta_data']
+        del df['metadata']
+        del df['updated_time']
+        del df['serial_id']
+
+        return df
+
+    def get_price_or_time(self, data, key):
+        price = data['price']
+        time = data['timestamp']
+        size = data['size']
+
+        if key == 'time':
+            return time, size
+        elif key == 'price':
+            return price, size
+        elif key == 'both':
+            return time, size, price
+
+    def divideTime(self, time, size, price):
+
+        time_number = 24
+        time_division_list = []
+        price_division_list = []
+
+        for i in range(time_number):
+            time_division_list.append([])
+            price_division_list.append([])
+
+        #timeRange 是用来进行比较判断的
+        #timeRange1 是用来作为坐标轴的
+        timeRange = []
+        timeRange1 = []
+
+        for i in range(24):
+            timeRange.append(int(''.join(((datetime.now() - timedelta(hours=i)).strftime('%Y-%m-%d-%H') + '0000').split('-'))))
+            timeRange1.append((datetime.now() - timedelta(hours=i)).strftime('%Y-%m-%d %H') + ':00:00')
+
+        for i in range(len(time)):
+            for j in range(len(timeRange)):
+                if j == 0:
+                    if int(int(time[i]) * 0.001) >= timeRange[j]:
+                        time_division_list[j].append(size[i])
+                        price_division_list[j].append(price[i])
+                else:
+                    if int(int(time[i]) * 0.001) >= timeRange[j] and int(int(time[i]) * 0.001) < timeRange[j-1]:
+                        time_division_list[j].append(size[i])
+                        price_division_list[j].append(price[i])
+
+        sum_time_size = []
+        ave_price = []
+
+        for i in range(len(time_division_list)):
+            sum_time_size.append(sum(time_division_list[i]))
+            sum_price = 0
+            for j in range(len(price_division_list[i])):
+                sum_price += price_division_list[i][j] * time_division_list[i][j]
+            ave_price.append(sum_price / sum_time_size[i])
+
+        return timeRange1, sum_time_size, ave_price
+
+    def dividePrice(self, price, size):
+
+        interval_number = 10
+        min_price = min(price)
+        max_price = max(price)
+        interval = (max_price - min_price) / interval_number
+
+        price_division_list = []
+        for i in range(interval_number):
+            price_division_list.append([])
+
+        for i in range(len(price)):
+            if price[i] >= min_price and price[i] < min_price + interval:
+                price_division_list[0].append(size[i])
+            elif price[i] >= min_price + interval and price[i] < min_price + interval * 2:
+                price_division_list[1].append(size[i])
+            elif price[i] >= min_price + interval * 2 and price[i] < min_price + interval * 3:
+                price_division_list[2].append(size[i])
+            elif price[i] >= min_price + interval * 3 and price[i] < min_price + interval * 4:
+                price_division_list[3].append(size[i])
+            elif price[i] >= min_price + interval * 4 and price[i] < min_price + interval * 5:
+                price_division_list[4].append(size[i])
+            elif price[i] >= min_price + interval * 5 and price[i] < min_price + interval * 6:
+                price_division_list[5].append(size[i])
+            elif price[i] >= min_price + interval * 6 and price[i] < min_price + interval * 7:
+                price_division_list[6].append(size[i])
+            elif price[i] >= min_price + interval * 7 and price[i] < min_price + interval * 8:
+                price_division_list[7].append(size[i])
+            elif price[i] >= min_price + interval * 8 and price[i] < min_price + interval * 9:
+                price_division_list[8].append(size[i])
+            else:
+                price_division_list[9].append(size[i])
+
+        sum_price_size = []
+        priceRange = []
+        for i in range(len(price_division_list)):
+            sum_price_size.append(sum(price_division_list[i]))
+            priceRange.append(str('%.4f' % (min_price + interval*i)) + '~' + str('%.4f' % (min_price + interval*(i+1))))
+
+        return priceRange, sum_price_size
+
+    def writeExcel(self, Range, Sum_size, ave_price, key):
+        workbook = xlwt.Workbook(encoding='ascii')
+        worksheet = workbook.add_sheet('Sheet1')
+
+        timenow = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+        #timestring = ''.join(timenow.split('-'))
+
+        if key == 'time':
+            worksheet.write(0, 0, label='time')
+            worksheet.write(0, 2, label='ave_price')
+            filename = 'Time_last24H.xls'
+        else:
+            worksheet.write(0, 0, label='price')
+            filename = 'Pprice_last24H.xls'
+
+        for i in range(len(Sum_size)):
+            worksheet.write(i + 1, 0, label=Range[i])
+            worksheet.write(i + 1, 1, label=Sum_size[i])
+
+        if len(ave_price) > 1:
+            worksheet.write(i + 1, 2, label=ave_price[i])
+
+        worksheet.write(0, 1, label='sum_time_size')
+
+        #写出excel！测试的时候注意隐掉！
+        workbook.save('Z:/Market making strategy/summaries_market_trade/'+filename)
+
+    def drawFigure(self, Range, Sum_size, ave_price, key):
+        fig, ax = plt.subplots()
+        b = ax.barh(range(len(Range)), Sum_size, color='#6699CC')
+
+        if len(ave_price) > 1:
+            for i in range(len(b)):
+                w = b[i].get_width()
+                ax.text(w, b[i].get_y() + b[i].get_height() / 2, '%d\n%f' % (int(w),ave_price[i]),  ha='left', va='center', fontsize=14.2)
+                fig.set_size_inches(20.5, 13.5)
+        else:
+            for i in range(len(b)):
+                w = b[i].get_width()
+                ax.text(w, b[i].get_y() + b[i].get_height() / 2, '%d' % int(w),  ha='left', va='center', fontsize=14.2)
+                fig.set_size_inches(14.5, 8.5)
+
+        ax.set_yticks(range(len(Range)))
+        # font=FontProperties(fname=r'/Library/Fonts/Songti.ttc')
+        ax.set_yticklabels(Range)
+
+        timenow = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+        #timestring = ''.join(timenow.split('-'))
+
+        if key == 'time':
+            plt.ylabel('time', fontsize=17)
+            filename = 'Time_last24H.png'
+        else:
+            plt.ylabel('price', fontsize=17)
+            filename = 'Price_last24H.png'
+
+        plt.xlabel('volume', fontsize=17)
+        plt.yticks(fontsize=13)
+        plt.xticks(fontsize=13)
+        plt.title('Last 24H trade volume', fontsize=15)
+
+        #写出图片！测试的时候注意隐掉！！！
+        plt.savefig('Z:/Market making strategy/summaries_market_trade/' + filename, dpi=100)
+
+        plt.show()
+        print('We have printed the figure!')
+
+    def execute_time(self):
+
+        conn = self.pg_connect()
+        data = self.trade_fetch_from_db(conn)
+        time, size, price = self.get_price_or_time(data, 'both')
+
+        timeRange, sum_time_size, ave_price = self.divideTime(time, size, price)
+        self.drawFigure(timeRange, sum_time_size, ave_price, 'time')
+        self.writeExcel(timeRange, sum_time_size, ave_price, 'time')
+
+        print('We have written the excel!')
+
+        conn.close()
+        print('Database closed!')
+
+    def execute_price(self):
+
+        conn = self.pg_connect()
+        data = self.trade_fetch_from_db(conn)
+        price, size = self.get_price_or_time(data, 'price')
+
+        priceRange, sum_price_size = self.dividePrice(price, size)
+        self.drawFigure(priceRange, sum_price_size, [], 'price')
+        self.writeExcel(priceRange, sum_price_size, [], 'price')
+
+        conn.close()
+        print('Database closed!')
+
+    def execute(self):
+        while True:
+            self.execute_time()
+            self.execute_price()
+            print('Wait for an hour!')
+
+            ti.sleep(3600)
+
+
+data = marketAnalysis()
+data.execute()
+
